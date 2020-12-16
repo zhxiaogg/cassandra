@@ -29,13 +29,40 @@ import org.apache.calcite.plan.RelOptTable;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.core.TableScan;
 import org.apache.calcite.util.Pair;
+import org.apache.cassandra.db.DecoratedKey;
 
+import java.util.Collections;
 import java.util.List;
 
-public class SSTableScan extends TableScan implements EnumerableRel {
+public class SSTableFilterScan extends TableScan implements EnumerableRel {
 
-    public SSTableScan(RelOptCluster cluster, RelOptTable table) {
+    private final List<DecoratedKey> keys;
+    private final List<String> selection;
+
+    public SSTableFilterScan(RelOptCluster cluster, RelOptTable table, List<DecoratedKey> keys, List<String> selection) {
         super(cluster, cluster.traitSetOf(EnumerableConvention.INSTANCE), ImmutableList.of(), table);
+        this.keys = keys;
+        this.selection = selection;
+    }
+
+    public SSTableFilterScan(RelOptCluster cluster, RelOptTable table) {
+        this(cluster, table, Collections.emptyList(), Collections.emptyList());
+    }
+
+    @Override
+    public Result implement(EnumerableRelImplementor implementor, Prefer prefer) {
+        PhysType physType =
+                PhysTypeImpl.of(
+                        implementor.getTypeFactory(),
+                        getRowType(),
+                        prefer.preferArray());
+
+        return implementor.result(
+                physType,
+                Blocks.toBlock(
+                        Expressions.call(table.getExpression(SSTable.class),
+                                "scan", implementor.getRootExpression(),
+                                Expressions.constant(keys), Expressions.constant(selection))));
     }
 
     @Override
@@ -51,20 +78,5 @@ public class SSTableScan extends TableScan implements EnumerableRel {
     @Override
     public DeriveMode getDeriveMode() {
         return null;
-    }
-
-    @Override
-    public Result implement(EnumerableRelImplementor implementor, Prefer prefer) {
-        PhysType physType =
-                PhysTypeImpl.of(
-                        implementor.getTypeFactory(),
-                        getRowType(),
-                        prefer.preferArray());
-
-        return implementor.result(
-                physType,
-                Blocks.toBlock(
-                        Expressions.call(table.getExpression(SSTable.class),
-                                "scan", implementor.getRootExpression())));
     }
 }

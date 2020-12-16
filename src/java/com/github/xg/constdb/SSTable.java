@@ -62,8 +62,8 @@ public class SSTable extends AbstractQueryableTable
      * Returns an enumerable over a given projection of the fields.
      */
     @SuppressWarnings("unused") // called from generated code
-    public Enumerable<Object> scan(final DataContext root,
-                                   List<DecoratedKey> keys, List<String> selection) {
+    public Enumerable<Object> filterScan(final DataContext root,
+                                         List<DecoratedKey> keys, List<String> selection) {
         final AtomicBoolean cancelFlag = DataContext.Variable.CANCEL_FLAG.get(root);
 
         // TODO: this should be part of the schema
@@ -72,13 +72,29 @@ public class SSTable extends AbstractQueryableTable
         SSTableReader reader = SSTableReader.open(desc);
         return new AbstractEnumerable<Object>() {
             public Enumerator<Object> enumerator() {
-                return (Enumerator<Object>) new SSTableEnumberator(
+                return (Enumerator) new SSTableEnumberator(
                         keys,
                         reader,
                         selection);
             }
         };
     }
+
+    public Enumerable<Object> scan(final DataContext root,
+                                   List<DecoratedKey> keys, List<String> selection) {
+        // final AtomicBoolean cancelFlag = DataContext.Variable.CANCEL_FLAG.get(root);
+
+        // TODO: this should be part of the schema
+        File dataDir = new File("/tmp/sstable");
+        Descriptor desc = new Descriptor(dataDir, metadata.keyspace, metadata.name, 1);
+        SSTableReader reader = SSTableReader.open(desc);
+        return new AbstractEnumerable<Object>() {
+            public Enumerator<Object> enumerator() {
+                return (Enumerator) new SSTableScanEnumerator(reader);
+            }
+        };
+    }
+
 
     @Override
     public RelDataType getRowType(RelDataTypeFactory relDataTypeFactory) {

@@ -37,7 +37,7 @@ public class SSTableFilterRule extends RelRule<SSTableFilterRule.Config> {
     @Override
     public void onMatch(RelOptRuleCall relOptRuleCall) {
         final LogicalFilter filter = relOptRuleCall.rel(0);
-        final SSTableScan scan = relOptRuleCall.rel(1);
+        final SSTableFilterScan scan = relOptRuleCall.rel(1);
         RexNode condition = filter.getCondition();
         // extract partition keys from condition
         List<DecoratedKey> keys = getPartitionsKeys(condition);
@@ -45,7 +45,7 @@ public class SSTableFilterRule extends RelRule<SSTableFilterRule.Config> {
             // this condition is not supported yet
             return;
         }
-        relOptRuleCall.transformTo(new SSTableScan(scan.getCluster(), scan.getTable(), keys, Collections.emptyList()));
+        relOptRuleCall.transformTo(new SSTableFilterScan(scan.getCluster(), scan.getTable(), keys, Collections.emptyList()));
     }
 
     private List<DecoratedKey> getPartitionsKeys(RexNode condition) {
@@ -56,7 +56,7 @@ public class SSTableFilterRule extends RelRule<SSTableFilterRule.Config> {
         Config DEFAULT = EMPTY
                 .withOperandSupplier(b0 ->
                         b0.operand(LogicalFilter.class).oneInput(b1 ->
-                                b1.operand(SSTableScan.class).noInputs()))
+                                b1.operand(SSTableFilterScan.class).noInputs()))
                 .as(Config.class);
 
         @Override

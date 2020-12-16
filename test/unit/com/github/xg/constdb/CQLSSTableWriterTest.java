@@ -19,17 +19,21 @@
 package com.github.xg.constdb;
 
 import com.google.common.collect.ImmutableMap;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.filter.ColumnFilter;
-import org.apache.cassandra.db.rows.Unfiltered;
-import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.io.sstable.CQLSSTableWriter;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.junit.Before;
 import org.junit.Rule;
@@ -55,7 +59,8 @@ public class CQLSSTableWriterTest {
         keyspace = "cql_keyspace" + idGen.incrementAndGet();
         table = "table" + idGen.incrementAndGet();
         qualifiedTable = keyspace + '.' + table;
-        dataDir = new File(tempFolder.newFolder().getAbsolutePath() + File.separator + keyspace + File.separator + table);
+        String rootDir = tempFolder.newFolder().getAbsolutePath();
+        dataDir = new File(rootDir + File.separator + keyspace + File.separator + table);
         assert dataDir.mkdirs();
     }
 
@@ -68,9 +73,11 @@ public class CQLSSTableWriterTest {
                 + ")";
         String insert = "INSERT INTO " + qualifiedTable + " (k, v1, v2) VALUES (?, ?, ?)";
         CQLSSTableWriter writer = CQLSSTableWriter.builder()
+                //.sorted()
                 .inDirectory(dataDir)
                 .forTable(schema)
-                .using(insert).build();
+                .using(insert)
+                .build();
 
         writer.addRow(0, "test1", 24);
         writer.addRow(1, "test2", 44);
@@ -84,33 +91,37 @@ public class CQLSSTableWriterTest {
             System.out.println(dataDir.toPath().relativize(file.toPath()));
         }
 
-        // try read sstable with its api, this is the ideal and also simplest way to read data
         TableMetadata tableMetadata = Schema.instance.getTableMetadata(keyspace, table);
+        SchemaSerDer.serialize(tableMetadata, dataDir.toPath().resolve("schema.json"));
+
+
+        // ================= read side =================//
+        // try read sstable with its api, this is the ideal and also simplest way to read data
+        // TODO: what's this?
+        DatabaseDescriptor.clientInitialization();
+        TableMetadata metadata2 = SchemaSerDer.deserialize(dataDir.toPath().resolve("schema.json"));
+
         Descriptor desc = new Descriptor(dataDir, keyspace, table, 1);
-        SSTableReader sstable = SSTableReader.open(desc);
-        DecoratedKey decoratedKey = tableMetadata.partitioner.decorateKey(ByteBufferUtil.bytes(1));
-        UnfilteredRowIterator iter = sstable.iterator(decoratedKey, Slices.ALL, ColumnFilter.all(tableMetadata), false, SSTableReadsListener.NOOP_LISTENER);
+        // TODO: waht's this?
+        TableMetadataRef metadata = TableMetadataRef.forOfflineTools(metadata2);
+        SSTableReader sstable = SSTableReader.open(desc, metadata);
+        DecoratedKey decoratedKey = metadata2.partitioner.decorateKey(ByteBufferUtil.bytes(1));
+        UnfilteredRowIterator iter = sstable.iterator(decoratedKey, Slices.ALL, ColumnFilter.all(metadata2), false, SSTableReadsListener.NOOP_LISTENER);
         for (UnfilteredRowIterator it = iter; it.hasNext(); ) {
             Unfiltered o = it.next();
+            for (ColumnData d : (Row) o) {
+                Cell<?> cell = (Cell<?>) d;
+                Object value = getValue(cell, cell.column().type);
+                System.out.println(value);
+            }
             System.out.println("row: " + o);
         }
 
-        // All the following tries failed, because they require a well initialized keyspace, just can't figure it out for now.
-        // Keyspace.mockKS()
-        // try to reuse c*
-//        Keyspace.setInitialized();
-//        CQLStatement statement = QueryProcessor.parseStatement(String.format("select * from %s where k = 1", qualifiedTable)).prepare(ClientState.forInternalCalls());
-//        ResultMessage resultMessage = statement.executeLocally(QueryState.forInternalCalls(), QueryOptions.DEFAULT);
-//        System.out.println(resultMessage);
-
-        // try query command
-//        SinglePartitionReadQuery singlePartitionReadQuery = SinglePartitionReadQuery.create(tableMetadata, (int) System.currentTimeMillis() / 1000, decoratedKey, null, null);
-//        ReadExecutionController executionController = singlePartitionReadQuery.executionController();
-//        UnfilteredPartitionIterator iter = singlePartitionReadQuery.executeLocally(executionController);
-//        for (UnfilteredPartitionIterator it = iter; it.hasNext(); ) {
-//            Object o = it.next();
-//            System.out.println(o);
-//        }
+        // TODO: what's this?
         sstable.selfRef().release();
+    }
+
+    public static <V> Object getValue(Cell<V> cell, AbstractType<?> type) {
+        return type.getSerializer().deserialize(cell.value(), cell.accessor());
     }
 }
